@@ -201,3 +201,25 @@ def draw_ori_on_img(img, ori, mask, fname, coh=None, stride=16):
     plt.savefig(fname, bbox_inches='tight', pad_inches = 0)
     plt.close(fig)            
     return
+
+
+def normalize(image, min_val, max_val, cutoff=0, interp='nearest'):
+    """Performs a change of an image intensity values range
+
+    Keyword Arguments:
+    image -- the input image
+    min_val -- The minimum value of the new intensity range
+    max_val -- The maximum value of the new intensity range
+    cutoff -- Precentile of pixels to be descarted at both
+        sides of the histogram
+    interp -- Interpolation method used when the desired cutoff
+        value lies between two data points {‘linear’, ‘lower’,
+        ‘higher’, ‘midpoint’, ‘nearest’}. See numpy.percentile
+        function for further details
+    """
+    minimum, maximum = np.percentile(image, [0 + cutoff, 100 - cutoff],
+                                     interpolation=interp)
+
+    ratio = float(max_val - min_val) / (maximum - minimum)
+    imgnorm = (image - minimum) * ratio + min_val
+    return imgnorm.astype(np.uint8)

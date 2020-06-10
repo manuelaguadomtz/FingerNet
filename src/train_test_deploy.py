@@ -34,6 +34,17 @@ parser = argparse.ArgumentParser(description='Train-Test-Deploy')
 parser.add_argument('--GPU', type=str, default="0", help='Your GPU ID')
 parser.add_argument('--mode', type=str, default="train",
                     help='train-test, test or deploy')
+parser.add_argument(
+    '--odir', type=str,
+    help='Path to location where extracted templates should be stored'
+)
+parser.add_argument(
+    '--idir', type=str, help='Path to directory containing input images'
+)
+parser.add_argument(
+    '--itype', type=str, required=False, default='.bmp',
+    help='Image file extension'
+)
 args = parser.parse_args()
 
 os.environ["CUDA_VISIBLE_DEVICES"] = args.GPU
@@ -135,10 +146,10 @@ def get_maximum_img_size_and_names(dataset, sample_rate=None):
         sample_rate = [1] * len(dataset)
     img_name, folder_name, img_size = [], [], []
     for folder, rate in zip(dataset, sample_rate):
-        _, img_name_t = get_files_in_folder(folder + 'images/', '.bmp')
+        _, img_name_t = get_files_in_folder(folder + 'images/', args.itype)
         img_name.extend(img_name_t.tolist() * rate)
         folder_name.extend([folder] * img_name_t.shape[0] * rate)
-        img_size.append(np.array(misc.imread(folder + 'images/' + img_name_t[0] + '.bmp', mode='L').shape))
+        img_size.append(np.array(misc.imread(folder + 'images/' + img_name_t[0] + args.itype, mode='L').shape))
     img_name = np.asarray(img_name)
     folder_name = np.asarray(folder_name)
     img_size = np.max(np.asarray(img_size), axis=0)
@@ -149,10 +160,10 @@ def get_maximum_img_size_and_names(dataset, sample_rate=None):
 
 def sub_load_data(data, img_size, aug):
     img_name, dataset = data
-    img = misc.imread(dataset + 'images/' + img_name + '.bmp', mode='L')
+    img = misc.imread(dataset + 'images/' + img_name + args.itype, mode='L')
     seg = misc.imread(dataset + 'seg_labels/' + img_name + '.png', mode='L')
     try:
-        ali = misc.imread(dataset + 'ori_labels/' + img_name + '.bmp', mode='L')
+        ali = misc.imread(dataset + 'ori_labels/' + img_name + args.itype, mode='L')
     except:
         ali = np.zeros_like(img)
     mnt = np.array(mnt_reader(dataset + 'mnt_labels/' + img_name + '.mnt'), dtype=float)
@@ -704,31 +715,32 @@ def test(test_set, model, outdir, test_num=10, draw=True):
     return
 
 
-def deploy(deploy_set, set_name=None):
-    if set_name is None:
-        set_name = deploy_set.split('/')[-2]
+def deploy(indir):
+    """Deploy funtion (Predicting)"""
 
-    mkdir(output_dir + '/' + set_name + '/')
-    logging.info("Predicting %s:" % (set_name))
-    _, img_name = get_files_in_folder(deploy_set, '.bmp')
+    from os.path import join
+
+    mkdir(args.odir)
+    logging.info("Predicting %s:" % args.odir)
+    _, img_name = get_files_in_folder(indir, args.itype)
 
     if len(img_name) == 0:
-        deploy_set = deploy_set + 'images/'
-        _, img_name = get_files_in_folder(deploy_set, '.bmp')
+        indir = join(indir, 'images/')
+        _, img_name = get_files_in_folder(indir, args.itype)
 
-    img_size = cv2.imread(deploy_set + img_name[0] + '.bmp', 0).shape
+    img_size = cv2.imread(join(indir, img_name[0] + args.itype), 0).shape
     img_size = np.array(img_size, dtype=np.int32) // 8 * 8
     main_net_model = get_main_net((img_size[0], img_size[1], 1), pretrain)
-    _, img_name = get_files_in_folder(deploy_set, '.bmp')
+    _, img_name = get_files_in_folder(indir, args.itype)
     time_c = []
+
     for i in range(0, len(img_name)):
-        logging.info(
-            "%s %d / %d: %s" % (set_name, i + 1, len(img_name), img_name[i])
-        )
+        logging.info("%s / %s" % (len(img_name), img_name[i]))
 
         time_start = time()
+
         # Loading and preprocessing images
-        image = cv2.imread(deploy_set + img_name[i] + '.bmp', 0) / 255.0
+        image = cv2.imread(join(indir, img_name[i] + args.itype), 0) / 255.0
         image = image[:img_size[0], :img_size[1]]
         image = np.reshape(image, [1, image.shape[0], image.shape[1], 1])
 
@@ -755,37 +767,38 @@ def deploy(deploy_set, set_name=None):
         # Writing minutiae
         mnt_writer(
             mnt_nms, img_name[i], img_size,
-            "%s/%s/%s.mnt" % (output_dir, set_name, img_name[i])
+            "%s/%s.mnt" % (args.odir, img_name[i])
         )
 
         # Draw orientation
         draw_ori_on_img(
-            image, ori, np.ones_like(seg_out),
-            "%s/%s/%s_ori.png" % (output_dir, set_name, img_name[i])
+            image, ori, seg_out,  # np.ones_like(seg_out),
+            "%s/%s_ori.jpg" % (args.odir, img_name[i])
         )
 
         # Drawing minutiae
         draw_minutiae(
             image, mnt_nms[:, :3],
-            "%s/%s/%s_mnt.png" % (output_dir, set_name, img_name[i])
+            "%s/%s_mnt.jpg" % (args.odir, img_name[i])
         )
 
         # Savinh enhanced image
         zoom = ndimage.zoom(np.round(np.squeeze(seg_out)), [8, 8], order=0)
         cv2.imwrite(
-            "%s/%s/%s_enh.png" % (output_dir, set_name, img_name[i]),
-            np.squeeze(enhance_img) * zoom
+            "%s/%s_enh.jpg" % (args.odir, img_name[i]),
+            normalize((np.squeeze(enhance_img) * zoom), 0, 255)
         )
 
         # saving mask
+        zoom = ndimage.zoom(np.round(np.squeeze(seg_out)), [8, 8], order=0)
         cv2.imwrite(
-            "%s/%s/%s_seg.png" % (output_dir, set_name, img_name[i]),
-            ndimage.zoom(np.round(np.squeeze(seg_out)), [8, 8], order=0)
+            "%s/%s_seg.jpg" % (args.odir, img_name[i]),
+            zoom.astype(np.uint8) * 255
         )
 
         # Saving orientation matrix
         io.savemat(
-            "%s/%s/%s.mat" % (output_dir, set_name, img_name[i]),
+            "%s/%s.mat" % (args.odir, img_name[i]),
             {'orientation': ori, 'orientation_distribution_map': ori_out_1}
         )
 
@@ -823,10 +836,10 @@ def main():
                 draw=False
             )
     elif args.mode == 'deploy':
-        for i, folder in enumerate(deploy_set):
-            deploy(folder, str(i))
+            deploy(args.idir)
     else:
         pass
+
 
 if __name__ == '__main__':
     main()
