@@ -1,12 +1,17 @@
-#coding=utf-8
-import os, sys, cv2, pickle
+# coding=utf-8
+
+import os
+import sys
+import cv2
+
 from multiprocessing import Pool
 from functools import partial
 from time import time
 import matplotlib
-# Force matplotlib to not use any Xwindows backend.
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
+
+# Python 3 compatibility imports
+from functools import reduce
+
 from datetime import datetime
 from utils import *
 from scipy import misc, ndimage, signal, sparse, io
@@ -14,25 +19,29 @@ from scipy import misc, ndimage, signal, sparse, io
 from keras import backend as K
 from keras.models import Model
 from keras.layers import Input
-from keras.layers.core import Flatten,Activation,Lambda
-from keras.layers.convolutional import Conv2D,MaxPooling2D,UpSampling2D
+from keras.layers.core import Activation, Lambda
+from keras.layers.convolutional import Conv2D, MaxPooling2D, UpSampling2D
 from keras.layers.normalization import BatchNormalization
 from keras.layers.advanced_activations import PReLU
 from keras.regularizers import l2
 from keras.optimizers import SGD, Adam
 from keras.utils import plot_model
-from keras.callbacks import ModelCheckpoint  
+
 import tensorflow as tf
 
 import argparse
+
+# Force matplotlib to not use any Xwindows backend.
+matplotlib.use('Agg')
+
 parser = argparse.ArgumentParser(description='Train-Test-Deploy')
-parser.add_argument('GPU', type=str, default="4",
+parser.add_argument('--GPU', type=str, default="0",
                     help='Your GPU ID')
-parser.add_argument('mode', type=str, default="train",
+parser.add_argument('--mode', type=str, default="train",
                     help='train-test, test or deploy')
 args = parser.parse_args()
 
-os.environ["CUDA_VISIBLE_DEVICES"]=args.GPU
+os.environ["CUDA_VISIBLE_DEVICES"] = args.GPU
 config = K.tf.ConfigProto(gpu_options=K.tf.GPUOptions(allow_growth=True))
 sess = K.tf.Session(config=config)
 K.set_session(sess)
@@ -462,7 +471,7 @@ def mnt_s_loss(y_true, y_pred):
 
 # find highest peak using gaussian
 def ori_highest_peak(y_pred, length=180):
-	y_pred = tf.convert_to_tensor(y_pred, np.float32)
+    y_pred = tf.convert_to_tensor(y_pred, np.float32)
     glabel = gausslabel(length=length,stride=2).astype(np.float32)
     ori_gau = K.conv2d(y_pred,glabel,padding='same')
     return ori_gau
@@ -565,7 +574,7 @@ def label2mnt(mnt_s_out, mnt_w_out, mnt_h_out, mnt_o_out, thresh=0.5):
     assert len(mnt_s_out.shape)==2 and len(mnt_w_out.shape)==3 and len(mnt_h_out.shape)==3 and len(mnt_o_out.shape)==3 
     # get cls results
     mnt_sparse = sparse.coo_matrix(mnt_s_out>thresh)
-    mnt_list = np.array(zip(mnt_sparse.row, mnt_sparse.col), dtype=np.int32)
+    mnt_list = np.array(list(zip(mnt_sparse.row, mnt_sparse.col)), dtype=np.int32)
     if mnt_list.shape[0] == 0:
         return np.zeros((0, 4))
     # get regression results
@@ -640,15 +649,15 @@ def deploy(deploy_set, set_name=None):
     if len(img_name) == 0:
         deploy_set = deploy_set+'images/'
         _, img_name = get_files_in_folder(deploy_set, '.bmp')
-    img_size = misc.imread(deploy_set+img_name[0]+'.bmp', mode='L').shape
-    img_size = np.array(img_size, dtype=np.int32)/8*8      
+    img_size = cv2.imread(deploy_set+img_name[0]+'.bmp', 0).shape
+    img_size = np.array(img_size, dtype=np.int32) // 8 * 8
     main_net_model = get_main_net((img_size[0],img_size[1],1), pretrain)
     _, img_name = get_files_in_folder(deploy_set, '.bmp')
     time_c = []
     for i in range(0,len(img_name)):
         logging.info("%s %d / %d: %s"%(set_name, i+1, len(img_name), img_name[i]))
         time_start = time()    
-        image = misc.imread(deploy_set+img_name[i]+'.bmp', mode='L') / 255.0
+        image = cv2.imread(deploy_set+img_name[i]+'.bmp', 0) / 255.0
         image = image[:img_size[0],:img_size[1]]      
         image = np.reshape(image,[1, image.shape[0], image.shape[1], 1])
         enhance_img, ori_out_1, ori_out_2, seg_out, mnt_o_out, mnt_w_out, mnt_h_out, mnt_s_out = main_net_model.predict(image) 
@@ -664,8 +673,8 @@ def deploy(deploy_set, set_name=None):
         mnt_writer(mnt_nms, img_name[i], img_size, "%s/%s/%s.mnt"%(output_dir, set_name, img_name[i]))        
         draw_ori_on_img(image, ori, np.ones_like(seg_out), "%s/%s/%s_ori.png"%(output_dir, set_name, img_name[i]))        
         draw_minutiae(image, mnt_nms[:,:3], "%s/%s/%s_mnt.png"%(output_dir, set_name, img_name[i]))
-        misc.imsave("%s/%s/%s_enh.png"%(output_dir, set_name, img_name[i]), np.squeeze(enhance_img)*ndimage.zoom(np.round(np.squeeze(seg_out)), [8,8], order=0))
-        misc.imsave("%s/%s/%s_seg.png"%(output_dir, set_name, img_name[i]), ndimage.zoom(np.round(np.squeeze(seg_out)), [8,8], order=0)) 
+        cv2.imwrite("%s/%s/%s_enh.png"%(output_dir, set_name, img_name[i]), np.squeeze(enhance_img)*ndimage.zoom(np.round(np.squeeze(seg_out)), [8,8], order=0))
+        cv2.imwrite("%s/%s/%s_seg.png"%(output_dir, set_name, img_name[i]), ndimage.zoom(np.round(np.squeeze(seg_out)), [8,8], order=0)) 
         io.savemat("%s/%s/%s.mat"%(output_dir, set_name, img_name[i]), {'orientation':ori, 'orientation_distribution_map':ori_out_1})
         time_afterdraw = time()
         time_c.append([time_afterconv-time_start, time_afterpost-time_afterconv, time_afterdraw-time_afterpost])
@@ -674,12 +683,13 @@ def deploy(deploy_set, set_name=None):
     logging.info("Average: load+conv: %.3fs, oir-select+seg-post+nms: %.3f, draw: %.3f"%(time_c[0],time_c[1],time_c[2]))
     return  
 
+
 def main():
     if args.mode == 'train':
         train()
-    elif args.mode == 'test':        
+    elif args.mode == 'test':
         for folder in test_set:
-            test([folder,], pretrain, output_dir+"/", test_num=258, draw=False) 
+            test([folder,], pretrain, output_dir+"/", test_num=258, draw=False)
     elif args.mode == 'deploy':
         for i, folder in enumerate(deploy_set):
             deploy(folder, str(i))
