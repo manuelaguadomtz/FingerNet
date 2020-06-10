@@ -71,8 +71,9 @@ deploy_set = [
 ]
 pretrain = '../models/released_version/Model.model'
 output_dir = '../output/' + datetime.now().strftime('%Y%m%d-%H%M%S')
-logging = init_log(output_dir)
-copy_file(sys.path[0] + '/' + sys.argv[0], output_dir + '/')
+
+logging = init_log(args.odir)
+copy_file(sys.path[0] + '/' + sys.argv[0], args.odir + '/')
 
 
 # image normalization

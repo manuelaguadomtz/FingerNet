@@ -39,6 +39,17 @@ parser.add_argument('--GPU', type=str, default="0",
                     help='Your GPU ID')
 parser.add_argument('--mode', type=str, default="train",
                     help='train-test, test or deploy')
+parser.add_argument(
+    '--odir', type=str,
+    help='Path to location where extracted templates should be stored'
+)
+parser.add_argument(
+    '--idir', type=str, help='Path to directory containing input images'
+)
+parser.add_argument(
+    '--itype', type=str, required=False, default='.bmp',
+    help='Image file extension'
+)
 args = parser.parse_args()
 
 os.environ["CUDA_VISIBLE_DEVICES"] = args.GPU
@@ -56,8 +67,10 @@ deploy_set = ['../datasets/NISTSD27/images/','../datasets/CISL24218/', \
             '../datasets/FVC2002DB2A/','../datasets/NIST4/','../datasets/NIST14/']
 pretrain = '../models/released_version/Model.model'
 output_dir = '../output/'+datetime.now().strftime('%Y%m%d-%H%M%S')
-logging = init_log(output_dir)
-copy_file(sys.path[0]+'/'+sys.argv[0], output_dir+'/')
+
+logging = init_log(args.odir)
+copy_file(sys.path[0] + '/' + sys.argv[0], args.odir + '/')
+
 
 # image normalization
 def img_normalization(img_input, m0=0.0, var0=1.0):
@@ -640,48 +653,113 @@ def test(test_set, model, outdir, test_num=10, draw=True):
                     ave_prf_nms[0],ave_prf_nms[1],ave_prf_nms[2],ave_prf_nms[3],ave_prf_nms[4]))     
     return
 
-def deploy(deploy_set, set_name=None):
-    if set_name is None:
-        set_name = deploy_set.split('/')[-2]
-    mkdir(output_dir+'/'+set_name+'/')
-    logging.info("Predicting %s:"%(set_name)) 
-    _, img_name = get_files_in_folder(deploy_set, '.bmp')
+
+def deploy(indir):
+    """Deploy funtion (Predicting)"""
+
+    from os.path import join
+
+    mkdir(args.odir)
+    logging.info("Predicting %s:" % args.odir)
+    _, img_name = get_files_in_folder(indir, args.itype)
+
     if len(img_name) == 0:
-        deploy_set = deploy_set+'images/'
-        _, img_name = get_files_in_folder(deploy_set, '.bmp')
-    img_size = cv2.imread(deploy_set+img_name[0]+'.bmp', 0).shape
+        indir = join(indir, 'images/')
+        _, img_name = get_files_in_folder(indir, args.itype)
+
+    img_size = cv2.imread(join(indir, img_name[0] + args.itype), 0).shape
     img_size = np.array(img_size, dtype=np.int32) // 8 * 8
-    main_net_model = get_main_net((img_size[0],img_size[1],1), pretrain)
-    _, img_name = get_files_in_folder(deploy_set, '.bmp')
+    main_net_model = get_main_net((img_size[0], img_size[1], 1), pretrain)
+    _, img_name = get_files_in_folder(indir, args.itype)
     time_c = []
-    for i in range(0,len(img_name)):
-        logging.info("%s %d / %d: %s"%(set_name, i+1, len(img_name), img_name[i]))
-        time_start = time()    
-        image = cv2.imread(deploy_set+img_name[i]+'.bmp', 0) / 255.0
-        image = image[:img_size[0],:img_size[1]]      
-        image = np.reshape(image,[1, image.shape[0], image.shape[1], 1])
-        enhance_img, ori_out_1, ori_out_2, seg_out, mnt_o_out, mnt_w_out, mnt_h_out, mnt_s_out = main_net_model.predict(image) 
+
+    for i in range(0, len(img_name)):
+
+        logging.info("%s / %s" % (len(img_name), img_name[i]))
+
+        time_start = time()
+
+        # Loading and preprocessing images
+        image = cv2.imread(join(indir, img_name[i] + args.itype), 0) / 255.0
+        image = image[:img_size[0], :img_size[1]]
+        image = np.reshape(image, [1, image.shape[0], image.shape[1], 1])
+
+        # Predicting
+        prediction = main_net_model.predict(image)
+        enhance_img, ori_out_1, ori_out_2, seg_out = prediction[:4]
+        mnt_o_out, mnt_w_out, mnt_h_out, mnt_s_out = prediction[4:]
         time_afterconv = time()
+
+        # Masking
         round_seg = np.round(np.squeeze(seg_out))
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(5, 5))
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
         seg_out = cv2.morphologyEx(round_seg, cv2.MORPH_OPEN, kernel)
-        mnt = label2mnt(np.squeeze(mnt_s_out)*np.round(np.squeeze(seg_out)), mnt_w_out, mnt_h_out, mnt_o_out, thresh=0.5)
+
+        # Minutiae post processing
+        mnt = label2mnt(
+            np.squeeze(mnt_s_out) * np.round(np.squeeze(seg_out)),
+            mnt_w_out, mnt_h_out, mnt_o_out, thresh=0.5)
         mnt_nms = nms(mnt)
-        ori = sess.run(ori_highest_peak(ori_out_1))                           
-        ori = (np.argmax(ori, axis=-1)*2-90)/180.*np.pi  
+        ori = sess.run(ori_highest_peak(ori_out_1))
+        ori = (np.argmax(ori, axis=-1) * 2 - 90) / 180. * np.pi
         time_afterpost = time()
-        mnt_writer(mnt_nms, img_name[i], img_size, "%s/%s/%s.mnt"%(output_dir, set_name, img_name[i]))        
-        draw_ori_on_img(image, ori, np.ones_like(seg_out), "%s/%s/%s_ori.png"%(output_dir, set_name, img_name[i]))        
-        draw_minutiae(image, mnt_nms[:,:3], "%s/%s/%s_mnt.png"%(output_dir, set_name, img_name[i]))
-        cv2.imwrite("%s/%s/%s_enh.png"%(output_dir, set_name, img_name[i]), np.squeeze(enhance_img)*ndimage.zoom(np.round(np.squeeze(seg_out)), [8,8], order=0))
-        cv2.imwrite("%s/%s/%s_seg.png"%(output_dir, set_name, img_name[i]), ndimage.zoom(np.round(np.squeeze(seg_out)), [8,8], order=0)) 
-        io.savemat("%s/%s/%s.mat"%(output_dir, set_name, img_name[i]), {'orientation':ori, 'orientation_distribution_map':ori_out_1})
+
+        # Writing minutiae
+        mnt_writer(
+            mnt_nms, img_name[i], img_size,
+            "%s/%s.mnt" % (args.odir, img_name[i])
+        )
+
+        # Draw orientation
+        draw_ori_on_img(
+            image, ori, seg_out,  # np.ones_like(seg_out),
+            "%s/%s_ori.jpg" % (args.odir, img_name[i])
+        )
+
+        # Drawing minutiae
+        draw_minutiae(
+            image, mnt_nms[:, :3],
+            "%s/%s_mnt.jpg" % (args.odir, img_name[i])
+        )
+
+        # Savinh enhanced image
+        zoom = ndimage.zoom(np.round(np.squeeze(seg_out)), [8, 8], order=0)
+        cv2.imwrite(
+            "%s/%s_enh.jpg" % (args.odir, img_name[i]),
+            normalize((np.squeeze(enhance_img) * zoom), 0, 255)
+        )
+
+        # saving mask
+        zoom = ndimage.zoom(np.round(np.squeeze(seg_out)), [8, 8], order=0)
+        cv2.imwrite(
+            "%s/%s_seg.jpg" % (args.odir, img_name[i]),
+            zoom.astype(np.uint8) * 255
+        )
+
+        # Saving orientation matrix
+        io.savemat(
+            "%s/%s.mat" % (args.odir, img_name[i]),
+            {'orientation': ori, 'orientation_distribution_map': ori_out_1}
+        )
         time_afterdraw = time()
-        time_c.append([time_afterconv-time_start, time_afterpost-time_afterconv, time_afterdraw-time_afterpost])
-        logging.info("load+conv: %.3fs, seg-postpro+nms: %.3f, draw: %.3f"%(time_c[-1][0],time_c[-1][1],time_c[-1][2]))
-    time_c = np.mean(np.array(time_c),axis=0)
-    logging.info("Average: load+conv: %.3fs, oir-select+seg-post+nms: %.3f, draw: %.3f"%(time_c[0],time_c[1],time_c[2]))
-    return  
+
+        # Time computation and logging
+        time_c.append([
+            time_afterconv - time_start,
+            time_afterpost - time_afterconv,
+            time_afterdraw - time_afterpost
+        ])
+        logging.info(
+            "load+conv: %.3fs, seg-postpro+nms: %.3f, draw: %.3f" %
+            (time_c[-1][0], time_c[-1][1], time_c[-1][2])
+        )
+
+    time_c = np.mean(np.array(time_c), axis=0)
+    logging.info(
+        "Average: load+conv: %.3fs, oir-select+seg-post+nms: %.3f, draw: %.3f" %
+        (time_c[0], time_c[1], time_c[2])
+    )
+    return
 
 
 def main():
@@ -689,12 +767,12 @@ def main():
         train()
     elif args.mode == 'test':
         for folder in test_set:
-            test([folder,], pretrain, output_dir+"/", test_num=258, draw=False)
+            test([folder,], pretrain, output_dir + "/", test_num=258, draw=False)
     elif args.mode == 'deploy':
-        for i, folder in enumerate(deploy_set):
-            deploy(folder, str(i))
+        deploy(args.idir)
     else:
         pass
+
 
 if __name__ =='__main__':
     main()

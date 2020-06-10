@@ -117,3 +117,8 @@ GPU: Titan, Titan Black, Titan X, K20, K40, K80.
 0. Run `python train_test_deploy.py 0 test` to test your model.
     - Different from Predicting, Testing requires datasets to have at least mnt labels and segmentation labels. 
     - Change `test_set=['*/', ...'*/']` in line 44 in `train_test_deploy.py` to test other datasets.
+
+### Running Python3
+
+    cd src
+    python train_test_deploy_new.py --mode deploy --idir /input/dir/ --odir /out/dir/ --itype .bmp
