@@ -174,7 +174,7 @@ def load_data(dataset, tra_ori_model, rand=False, aug=0.0, batch_size=1, sample_
     if batch_size > 1 and use_multiprocessing==True:
         p = Pool(batch_size)        
     p_sub_load_data = partial(sub_load_data, img_size=img_size, aug=aug)
-    for i in xrange(0,len(img_name), batch_size):
+    for i in range(0,len(img_name), batch_size):
         have_alignment = np.ones([batch_size, 1, 1, 1])
         image = np.zeros((batch_size, img_size[0], img_size[1], 1))
         segment = np.zeros((batch_size, img_size[0], img_size[1], 1))
@@ -182,13 +182,13 @@ def load_data(dataset, tra_ori_model, rand=False, aug=0.0, batch_size=1, sample_
         minutiae_w = np.zeros((batch_size, img_size[0]/8, img_size[1]/8, 1))-1
         minutiae_h = np.zeros((batch_size, img_size[0]/8, img_size[1]/8, 1))-1
         minutiae_o = np.zeros((batch_size, img_size[0]/8, img_size[1]/8, 1))-1
-        batch_name = [img_name[(i+j)%len(img_name)] for j in xrange(batch_size)]
-        batch_f_name = [folder_name[(i+j)%len(img_name)] for j in xrange(batch_size)]
+        batch_name = [img_name[(i+j)%len(img_name)] for j in range(batch_size)]
+        batch_f_name = [folder_name[(i+j)%len(img_name)] for j in range(batch_size)]
         if batch_size > 1 and use_multiprocessing==True:    
             results = p.map(p_sub_load_data, zip(batch_name, batch_f_name))
         else:
             results = map(p_sub_load_data, zip(batch_name, batch_f_name))
-        for j in xrange(batch_size):
+        for j in range(batch_size):
             img, seg, ali, mnt = results[j]
             if np.sum(ali) == 0:
                 have_alignment[j, 0, 0, 0] = 0
@@ -645,7 +645,7 @@ def deploy(deploy_set, set_name=None):
     main_net_model = get_main_net((img_size[0],img_size[1],1), pretrain)
     _, img_name = get_files_in_folder(deploy_set, '.bmp')
     time_c = []
-    for i in xrange(0,len(img_name)):
+    for i in range(0,len(img_name)):
         logging.info("%s %d / %d: %s"%(set_name, i+1, len(img_name), img_name[i]))
         time_start = time()    
         image = misc.imread(deploy_set+img_name[i]+'.bmp', mode='L') / 255.0
