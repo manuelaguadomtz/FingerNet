@@ -122,3 +122,8 @@ GPU: Titan, Titan Black, Titan X, K20, K40, K80.
 
     cd src
     python train_test_deploy_new.py --mode deploy --idir /input/dir/ --odir /out/dir/ --itype .bmp
+
+To run train
+    
+    pip install pydot
+    python train_test_deploy_new.py --mode train --idir /input/dir/ --odir /out/dir/ --itype .bmp

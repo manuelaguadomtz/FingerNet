@@ -50,6 +50,10 @@ parser.add_argument(
     '--itype', type=str, required=False, default='.bmp',
     help='Image file extension'
 )
+parser.add_argument(
+    '--model', type=str, required=False, default='',
+    help='Image file extension'
+)
 args = parser.parse_args()
 
 os.environ["CUDA_VISIBLE_DEVICES"] = args.GPU
@@ -60,34 +64,49 @@ K.set_session(sess)
 batch_size = 2
 use_multiprocessing = False
 
-train_set = ['../datasets/CISL24218/',]
+train_set = ['../datasets/CISL24218/', ]
 train_sample_rate = None
-test_set = ['../datasets/NISTSD27/',]
-deploy_set = ['../datasets/NISTSD27/images/','../datasets/CISL24218/', \
-            '../datasets/FVC2002DB2A/','../datasets/NIST4/','../datasets/NIST14/']
+test_set = ['../datasets/NISTSD27/', ]
+deploy_set = [
+    '../datasets/NISTSD27/images/',
+    '../datasets/CISL24218/',
+    '../datasets/FVC2002DB2A/',
+    '../datasets/NIST4/',
+    '../datasets/NIST14/'
+]
 pretrain = '../models/released_version/Model.model'
-output_dir = '../output/'+datetime.now().strftime('%Y%m%d-%H%M%S')
+output_dir = '../output/' + datetime.now().strftime('%Y%m%d-%H%M%S')
 
 logging = init_log(args.odir)
-copy_file(sys.path[0] + '/' + sys.argv[0], args.odir + '/')
+# copy_file(sys.path[0] + '/' + sys.argv[0], args.odir + '/')
 
 
 # image normalization
 def img_normalization(img_input, m0=0.0, var0=1.0):
-    m = K.mean(img_input, axis=[1,2,3], keepdims=True)
-    var = K.var(img_input, axis=[1,2,3], keepdims=True)
-    after = K.sqrt(var0*K.tf.square(img_input-m)/var)
-    image_n = K.tf.where(K.tf.greater(img_input, m), m0+after, m0-after)
+    m = K.mean(img_input, axis=[1, 2, 3], keepdims=True)
+    var = K.var(img_input, axis=[1, 2, 3], keepdims=True)
+    after = K.sqrt(var0 * K.tf.square(img_input - m) / var)
+    image_n = K.tf.where(K.tf.greater(img_input, m), m0 + after, m0 - after)
     return image_n
+
 
 # atan2 function
 def atan2(y_x):
-    y, x = y_x[0], y_x[1]+K.epsilon()
-    atan = K.tf.atan(y/x)
-    angle = K.tf.where(K.tf.greater(x,0.0), atan, K.tf.zeros_like(x))
-    angle = K.tf.where(K.tf.logical_and(K.tf.less(x,0.0),  K.tf.greater_equal(y,0.0)), atan+np.pi, angle)
-    angle = K.tf.where(K.tf.logical_and(K.tf.less(x,0.0),  K.tf.less(y,0.0)), atan-np.pi, angle)
+    y, x = y_x[0], y_x[1] + K.epsilon()
+    atan = K.tf.atan(y / x)
+    angle = K.tf.where(K.tf.greater(x, 0.0), atan, K.tf.zeros_like(x))
+    angle = K.tf.where(
+        K.tf.logical_and(K.tf.less(x, 0.0), K.tf.greater_equal(y, 0.0)),
+        atan + np.pi,
+        angle
+    )
+    angle = K.tf.where(
+        K.tf.logical_and(K.tf.less(x, 0.0), K.tf.less(y, 0.0)),
+        atan - np.pi,
+        angle
+    )
     return angle
+
 
 # traditional orientation estimation
 def orientation(image, stride=8, window=17):
@@ -119,38 +138,49 @@ def orientation(image, stride=8, window=17):
             theta = atan2([phi_y, phi_x])/2
     return theta
 
+
 def get_tra_ori():
-    img_input=Input(shape=(None, None, 1))
+    img_input = Input(shape=(None, None, 1))
     theta = Lambda(orientation)(img_input)
-    model = Model(inputs=[img_input,], outputs=[theta,])
+    model = Model(inputs=[img_input, ], outputs=[theta, ])
     return model
+
+
 tra_ori_model = get_tra_ori()
+
 
 def get_maximum_img_size_and_names(dataset, sample_rate=None):
     if sample_rate is None:
-        sample_rate = [1]*len(dataset)
+        sample_rate = [1] * len(dataset)
+
     img_name, folder_name, img_size = [], [], []
     for folder, rate in zip(dataset, sample_rate):
-        _, img_name_t = get_files_in_folder(folder+'images/', '.bmp')
-        img_name.extend(img_name_t.tolist()*rate)
-        folder_name.extend([folder]*img_name_t.shape[0]*rate)
-        img_size.append(np.array(misc.imread(folder+'images/'+img_name_t[0]+'.bmp', mode='L').shape))
+        indir = os.path.join(folder, 'images/')
+        _, img_name_t = get_files_in_folder(indir, args.itype)
+        img_name.extend(img_name_t.tolist() * rate)
+        folder_name.extend([folder] * img_name_t.shape[0] * rate)
+        img = cv2.imread(indir + img_name_t[0] + args.itype, 0)
+        img_size.append(img.shape)
     img_name = np.asarray(img_name)
     folder_name = np.asarray(folder_name)
     img_size = np.max(np.asarray(img_size), axis=0)
     # let img_size % 8 == 0
-    img_size = np.array(np.ceil(img_size/8)*8,dtype=np.int32)
+    img_size = np.array(np.ceil(img_size / 8) * 8, dtype=np.int32)
     return img_name, folder_name, img_size
 
-def sub_load_data(data, img_size, aug): 
+
+def sub_load_data(data, img_size, aug):
     img_name, dataset = data
-    img = misc.imread(dataset+'images/'+img_name+'.bmp', mode='L')
-    seg = misc.imread(dataset+'seg_labels/'+img_name+'.png', mode='L')
+    img = cv2.imread(os.path.join(dataset, 'images/') + img_name + args.itype, 0)
+    seg = cv2.imread(os.path.join(dataset, 'seg_labels/') + img_name + '.png', 0)
+
     try:
-        ali = misc.imread(dataset+'ori_labels/'+img_name+'.bmp', mode='L')
+        ali = cv2.imread(os.path.join(dataset, 'ori_labels/') + img_name + args.itype, 0)
     except:
         ali = np.zeros_like(img)
-    mnt = np.array(mnt_reader(dataset+'mnt_labels/'+img_name+'.mnt'), dtype=float)
+
+    mnt = np.array(mnt_reader(os.path.join(dataset, 'mnt_labels/') + img_name + '.mnt'), dtype=float)
+
     if any(img.shape != img_size):
         # random pad mean values to reach required shape
         if np.random.rand()<aug:
@@ -183,33 +213,44 @@ def sub_load_data(data, img_size, aug):
     mnt = mnt[(8<=mnt[:,0])*(mnt[:,0]<img_size[1]-8)*(8<=mnt[:, 1])*(mnt[:,1]<img_size[0]-8), :]
     return img, seg, ali, mnt   
 
-def load_data(dataset, tra_ori_model, rand=False, aug=0.0, batch_size=1, sample_rate=None):
+
+def load_data(dataset, tra_ori_model, rand=False,
+              aug=0.0, batch_size=1, sample_rate=None):
+
     if type(dataset[0]) == str:
-        img_name, folder_name, img_size = get_maximum_img_size_and_names(dataset, sample_rate)
+        img_name, folder_name, img_size = get_maximum_img_size_and_names(
+            dataset, sample_rate
+        )
     else:
         img_name, folder_name, img_size = dataset
+
     if rand:
         rand_idx = np.arange(len(img_name))
         np.random.shuffle(rand_idx)
         img_name = img_name[rand_idx]
         folder_name = folder_name[rand_idx]
-    if batch_size > 1 and use_multiprocessing==True:
-        p = Pool(batch_size)        
+
+    if batch_size > 1 and use_multiprocessing is True:
+        p = Pool(batch_size)
     p_sub_load_data = partial(sub_load_data, img_size=img_size, aug=aug)
-    for i in range(0,len(img_name), batch_size):
+
+    for i in range(0, len(img_name), batch_size):
         have_alignment = np.ones([batch_size, 1, 1, 1])
         image = np.zeros((batch_size, img_size[0], img_size[1], 1))
         segment = np.zeros((batch_size, img_size[0], img_size[1], 1))
         alignment = np.zeros((batch_size, img_size[0], img_size[1], 1))
-        minutiae_w = np.zeros((batch_size, img_size[0]/8, img_size[1]/8, 1))-1
-        minutiae_h = np.zeros((batch_size, img_size[0]/8, img_size[1]/8, 1))-1
-        minutiae_o = np.zeros((batch_size, img_size[0]/8, img_size[1]/8, 1))-1
-        batch_name = [img_name[(i+j)%len(img_name)] for j in range(batch_size)]
-        batch_f_name = [folder_name[(i+j)%len(img_name)] for j in range(batch_size)]
-        if batch_size > 1 and use_multiprocessing==True:    
-            results = p.map(p_sub_load_data, zip(batch_name, batch_f_name))
+
+        minutiae_w = np.zeros((batch_size, img_size[0] // 8, img_size[1] // 8, 1)) -1
+        minutiae_h = np.zeros((batch_size, img_size[0] // 8, img_size[1] // 8, 1)) -1
+        minutiae_o = np.zeros((batch_size, img_size[0] // 8, img_size[1] // 8, 1)) -1
+        batch_name = [img_name[(i + j) % len(img_name)] for j in range(batch_size)]
+        batch_f_name = [folder_name[(i + j) % len(img_name)] for j in range(batch_size)]
+
+        if batch_size > 1 and use_multiprocessing is True:
+            results = list(p.map(p_sub_load_data, zip(batch_name, batch_f_name)))
         else:
-            results = map(p_sub_load_data, zip(batch_name, batch_f_name))
+            results = list(map(p_sub_load_data, zip(batch_name, batch_f_name)))
+
         for j in range(batch_size):
             img, seg, ali, mnt = results[j]
             if np.sum(ali) == 0:
@@ -272,45 +313,70 @@ def load_data(dataset, tra_ori_model, rand=False, aug=0.0, batch_size=1, sample_
         p.join()
     return
 
+
 def merge_mul(x):
-    return reduce(lambda x,y:x*y, x)
+    return reduce(lambda x, y: x * y, x)
+
+
 def merge_sum(x):
-    return reduce(lambda x,y:x+y, x)
+    return reduce(lambda x, y: x + y, x)
+
+
 def reduce_sum(x):
-    return K.sum(x,axis=-1,keepdims=True) 
+    return K.sum(x, axis=-1, keepdims=True)
+
+
 def merge_concat(x):
-    return K.tf.concat(x,3)
+    return K.tf.concat(x, 3)
+
+
 def select_max(x):
-    x = x / (K.max(x, axis=-1, keepdims=True)+K.epsilon())
-    x = K.tf.where(K.tf.greater(x, 0.999), x, K.tf.zeros_like(x)) # select the biggest one
-    x = x / (K.sum(x, axis=-1, keepdims=True)+K.epsilon()) # prevent two or more ori is selected
-    return x  
-def conv_bn(bottom, w_size, name, strides=(1,1), dilation_rate=(1,1)):
-    top = Conv2D(w_size[0], (w_size[1],w_size[2]),
+    x = x / (K.max(x, axis=-1, keepdims=True) + K.epsilon())
+    # select the biggest one
+    x = K.tf.where(K.tf.greater(x, 0.999), x, K.tf.zeros_like(x))
+    # prevent two or more ori is selected
+    x = x / (K.sum(x, axis=-1, keepdims=True) + K.epsilon())
+    return x
+
+
+def conv_bn(bottom, w_size, name, strides=(1, 1), dilation_rate=(1, 1)):
+    top = Conv2D(
+        w_size[0], (w_size[1], w_size[2]),
         kernel_regularizer=l2(5e-5),
-        padding='same', 
+        padding='same',
         strides=strides,
         dilation_rate=dilation_rate,
-        name='conv-'+name)(bottom)
-    top = BatchNormalization(name='bn-'+name)(top)
+        name='conv-' + name
+    )(bottom)
+    top = BatchNormalization(name='bn-' + name)(top)
     return top
-def conv_bn_prelu(bottom, w_size, name, strides=(1,1), dilation_rate=(1,1)):
-    if dilation_rate == (1,1):
+
+
+def conv_bn_prelu(bottom, w_size, name, strides=(1, 1), dilation_rate=(1, 1)):
+    if dilation_rate == (1, 1):
         conv_type = 'conv'
     else:
         conv_type = 'atrousconv'
-    top = Conv2D(w_size[0], (w_size[1],w_size[2]),
+    top = Conv2D(
+        w_size[0], (w_size[1], w_size[2]),
         kernel_regularizer=l2(5e-5),
-        padding='same', 
+        padding='same',
         strides=strides,
         dilation_rate=dilation_rate,
-        name=conv_type+name)(bottom)
-    top = BatchNormalization(name='bn-'+name)(top)
-    top=PReLU(alpha_initializer='zero', shared_axes=[1,2], name='prelu-'+name)(top)
+        name=conv_type + name
+    )(bottom)
+    top = BatchNormalization(name='bn-' + name)(top)
+    top = PReLU(
+        alpha_initializer='zero',
+        shared_axes=[1, 2],
+        name='prelu-' + name
+    )(top)
     return top
-def get_main_net(input_shape=(512,512,1), weights_path=None):
-    img_input=Input(input_shape)
-    bn_img=Lambda(img_normalization, name='img_norm')(img_input)
+
+
+def get_main_net(input_shape=(512, 512, 1), weights_path=None):
+    img_input = Input(input_shape)
+    bn_img = Lambda(img_normalization, name='img_norm')(img_input)
     # feature extraction VGG
     conv=conv_bn_prelu(bn_img, (64,3,3), '1_1') 
     conv=conv_bn_prelu(conv, (64,3,3), '1_2')
@@ -416,6 +482,7 @@ def ori2angle(ori):
     modulus_ori = K.sqrt(K.square(sin2angle_ori)+K.square(cos2angle_ori))
     return sin2angle_ori, cos2angle_ori, modulus_ori
 
+
 def ori_loss(y_true, y_pred, lamb=1.):
     # clip
     y_pred = K.tf.clip_by_value(y_pred, K.epsilon(), 1 - K.epsilon())
@@ -438,6 +505,7 @@ def ori_loss(y_true, y_pred, lamb=1.):
     loss = logloss + lamb*coherenceloss
     return loss
 
+
 def ori_o_loss(y_true, y_pred):
     # clip
     y_pred = K.tf.clip_by_value(y_pred, K.epsilon(), 1 - K.epsilon())
@@ -450,6 +518,7 @@ def ori_o_loss(y_true, y_pred):
     logloss = logloss*label_seg # apply ROI
     logloss = -K.sum(logloss) / (K.sum(label_seg) + K.epsilon())
     return logloss
+
 
 def seg_loss(y_true, y_pred, lamb=1.):
     # clip
@@ -467,6 +536,7 @@ def seg_loss(y_true, y_pred, lamb=1.):
     loss = logloss + lamb*smoothloss
     return loss
 
+
 def mnt_s_loss(y_true, y_pred):
     # clip
     y_pred = K.tf.clip_by_value(y_pred, K.epsilon(), 1 - K.epsilon())
@@ -482,12 +552,14 @@ def mnt_s_loss(y_true, y_pred):
     logloss = -K.sum(logloss) / total_elements
     return logloss    
 
+
 # find highest peak using gaussian
 def ori_highest_peak(y_pred, length=180):
     y_pred = tf.convert_to_tensor(y_pred, np.float32)
     glabel = gausslabel(length=length,stride=2).astype(np.float32)
     ori_gau = K.conv2d(y_pred,glabel,padding='same')
     return ori_gau
+
 
 def ori_acc_delta_k(y_true, y_pred, k=10, max_delta=180):
     # get ROI
@@ -505,78 +577,145 @@ def ori_acc_delta_k(y_true, y_pred, k=10, max_delta=180):
     acc = acc*label_seg
     acc = K.sum(acc) / (K.sum(label_seg)+K.epsilon())
     return acc
+
+
 def ori_acc_delta_10(y_true, y_pred):
     return ori_acc_delta_k(y_true, y_pred, 10)
+
+
 def ori_acc_delta_20(y_true, y_pred):
     return ori_acc_delta_k(y_true, y_pred, 20)
+
+
 def mnt_acc_delta_10(y_true, y_pred):
     return ori_acc_delta_k(y_true, y_pred, 10, 360)
+
+
 def mnt_acc_delta_20(y_true, y_pred):
-    return ori_acc_delta_k(y_true, y_pred, 20, 360)    
+    return ori_acc_delta_k(y_true, y_pred, 20, 360)
+
 
 def seg_acc_pos(y_true, y_pred):
     y_true = K.tf.where(K.tf.less(y_true,0.0), K.tf.zeros_like(y_true), y_true)
     acc = K.cast(K.equal(y_true, K.round(y_pred)), dtype=K.tf.float32)
     acc = K.sum(acc * y_true) / (K.sum(y_true)+K.epsilon())
-    return acc    
+    return acc
+
+
 def seg_acc_neg(y_true, y_pred):
     y_true = K.tf.where(K.tf.less(y_true,0.0), K.tf.zeros_like(y_true), y_true)
     acc = K.cast(K.equal(y_true, K.round(y_pred)), dtype=K.tf.float32)
     acc = K.sum(acc * (1-y_true)) / (K.sum(1-y_true)+K.epsilon())
     return acc
+
+
 def seg_acc_all(y_true, y_pred):
-    y_true = K.tf.where(K.tf.less(y_true,0.0), K.tf.zeros_like(y_true), y_true)
-    return K.mean(K.equal(y_true, K.round(y_pred)))  
+    y_true = K.tf.where(K.tf.less(y_true, 0.0), K.tf.zeros_like(y_true), y_true)
+    return K.mean(K.equal(y_true, K.round(y_pred)))
+
 
 def mnt_mean_delta(y_true, y_pred):
     # get ROI
     label_seg = K.sum(y_true, axis=-1)
-    label_seg = K.tf.cast(K.tf.greater(label_seg, 0), K.tf.float32) 
-    # get pred pos    
+    label_seg = K.tf.cast(K.tf.greater(label_seg, 0), K.tf.float32)
+    # get pred pos
     pos = K.cast(K.argmax(y_pred, axis=-1), dtype=K.tf.float32)
     # get gt pos
     pos_t = K.cast(K.argmax(y_true, axis=-1), dtype=K.tf.float32)
     # get delta
     pos_delta = K.abs(pos_t - pos)
     # apply ROI
-    pos_delta = pos_delta*label_seg
-    mean_delta = K.sum(pos_delta) / (K.sum(label_seg)+K.epsilon())
+    pos_delta = pos_delta * label_seg
+    mean_delta = K.sum(pos_delta) / (K.sum(label_seg) + K.epsilon())
     return mean_delta
 
-def train(input_shape=(512,512,1)):
-    img_name, folder_name, img_size = get_maximum_img_size_and_names(train_set, train_sample_rate)  
-    main_net_model = get_main_net((img_size[0],img_size[1],1), pretrain)
-    plot_model(main_net_model, to_file=output_dir+'/model.png',show_shapes=True)
-    adam = Adam(lr=0.0001, beta_1=0.9, beta_2=0.999, epsilon=1e-08)    
-    main_net_model.compile(optimizer=adam, 
-        loss={'ori_out_1':ori_loss, 'ori_out_2':ori_o_loss, 'seg_out':seg_loss, 
-                'mnt_o_out':ori_o_loss, 'mnt_w_out':ori_o_loss, 'mnt_h_out':ori_o_loss, 'mnt_s_out':mnt_s_loss}, 
-        loss_weights={'ori_out_1':.1, 'ori_out_2':.1, 'seg_out':10., 
-                'mnt_w_out':.5, 'mnt_h_out':.5, 'mnt_o_out':.5,'mnt_s_out':200.},
-        metrics={'ori_out_1':[ori_acc_delta_10,],
-                 'ori_out_2':[ori_acc_delta_10,],
-                 'seg_out':[seg_acc_pos, seg_acc_neg, seg_acc_all],
-                 'mnt_o_out':[mnt_acc_delta_10,],
-                 'mnt_w_out':[mnt_mean_delta,],
-                 'mnt_h_out':[mnt_mean_delta,],
-                 'mnt_s_out':[seg_acc_pos, seg_acc_neg, seg_acc_all]})
+
+def train():
+    # Loading directory
+    img_name, folder_name, img_size = get_maximum_img_size_and_names(
+        [args.idir], train_sample_rate
+    )
+
+    # Loading main model
+    main_net_model = get_main_net((img_size[0], img_size[1], 1), pretrain)
+    plot_model(
+        main_net_model, to_file=args.odir + '/model.png', show_shapes=True
+    )
+
+    # Initializing Adam optimizer
+    adam = Adam(lr=0.0001, beta_1=0.9, beta_2=0.999, epsilon=1e-08)
+
+    # Compiling main model
+    main_net_model.compile(
+        optimizer=adam,
+        loss={
+            'ori_out_1': ori_loss,
+            'ori_out_2': ori_o_loss,
+            'seg_out': seg_loss,
+            'mnt_o_out': ori_o_loss,
+            'mnt_w_out': ori_o_loss,
+            'mnt_h_out': ori_o_loss,
+            'mnt_s_out': mnt_s_loss
+        },
+        loss_weights={
+            'ori_out_1': .1,
+            'ori_out_2': .1,
+            'seg_out': 10.,
+            'mnt_w_out': .5,
+            'mnt_h_out': .5,
+            'mnt_o_out': .5,
+            'mnt_s_out': 200.
+        },
+        metrics={
+            'ori_out_1': [ori_acc_delta_10, ],
+            'ori_out_2': [ori_acc_delta_10, ],
+            'seg_out': [seg_acc_pos, seg_acc_neg, seg_acc_all],
+            'mnt_o_out': [mnt_acc_delta_10, ],
+            'mnt_w_out': [mnt_mean_delta, ],
+            'mnt_h_out': [mnt_mean_delta, ],
+            'mnt_s_out': [seg_acc_pos, seg_acc_neg, seg_acc_all]
+        }
+    )
+
+    # Loading data
+    data = load_data(
+        (img_name, folder_name, img_size),
+        tra_ori_model,
+        rand=True,
+        aug=0.7,
+        batch_size=batch_size
+    )
+
     for epoch in range(100):
-        for i, train in enumerate(load_data((img_name, folder_name, img_size), tra_ori_model, rand=True, aug=0.7, batch_size=batch_size)):
-            loss = main_net_model.train_on_batch(train[0], 
-                {'ori_out_1':train[1], 'ori_out_2':train[2], 'seg_out':train[3],
-                'mnt_w_out':train[4], 'mnt_h_out':train[5], 'mnt_o_out':train[6], 'mnt_s_out':train[7]})  
-            if i%(20/batch_size) == 0:
+        for i, train in enumerate(data):
+            loss = main_net_model.train_on_batch(
+                train[0],
+                {
+                    'ori_out_1': train[1],
+                    'ori_out_2': train[2],
+                    'seg_out': train[3],
+                    'mnt_w_out': train[4],
+                    'mnt_h_out': train[5],
+                    'mnt_o_out': train[6],
+                    'mnt_s_out': train[7]
+                }
+            )
+
+            if i % (20 / batch_size) == 0:
                 logging.info("epoch=%d, step=%d", epoch, i)
-                logging.info("%s", " ".join(["%s:%.4f\n"%(x) for x in zip(main_net_model.metrics_names, loss)]))
-            if i%(10000/batch_size) == (10000/batch_size)-1:
-                # test every 10000 pics
-                outdir = "%s/%03d_%05d/"%(output_dir, epoch, i)
-                re_mkdir(outdir)
-                savedir = "%s%s"%(outdir, str(epoch)+'_'+str(i))
-                main_net_model.save_weights(savedir, True)
-                for folder in test_set:
-                    test([folder,], savedir, outdir, test_num=10, draw=False)
+                logging.info("%s", " ".join(["%s:%.4f\n" % (x) for x in zip(main_net_model.metrics_names, loss)]))
+
+        if epoch % 10 == 0:
+            outdir = "%s/epoch_%03d/" % (args.odir, epoch)
+            re_mkdir(outdir)
+            savedir = "%s%s" % (outdir, str(epoch) + '_' + str(i))
+            main_net_model.save_weights(savedir, True)
+
+    for folder in test_set:
+        test([folder, ], savedir, outdir, test_num=10, draw=False)
+
     return
+
 
 # currently can only produce one each time
 def label2mnt(mnt_s_out, mnt_w_out, mnt_h_out, mnt_o_out, thresh=0.5):
@@ -585,15 +724,19 @@ def label2mnt(mnt_s_out, mnt_w_out, mnt_h_out, mnt_o_out, thresh=0.5):
     mnt_h_out = np.squeeze(mnt_h_out)
     mnt_o_out = np.squeeze(mnt_o_out)
     assert len(mnt_s_out.shape)==2 and len(mnt_w_out.shape)==3 and len(mnt_h_out.shape)==3 and len(mnt_o_out.shape)==3 
+
     # get cls results
-    mnt_sparse = sparse.coo_matrix(mnt_s_out>thresh)
+    mnt_sparse = sparse.coo_matrix(mnt_s_out > thresh)
     mnt_list = np.array(list(zip(mnt_sparse.row, mnt_sparse.col)), dtype=np.int32)
     if mnt_list.shape[0] == 0:
         return np.zeros((0, 4))
+
     # get regression results
     mnt_w_out = np.argmax(mnt_w_out, axis=-1)
     mnt_h_out = np.argmax(mnt_h_out, axis=-1)
-    mnt_o_out = np.argmax(mnt_o_out, axis=-1) # TODO: use ori_highest_peak(np version)
+    # TODO: use ori_highest_peak(np version)
+    mnt_o_out = np.argmax(mnt_o_out, axis=-1)
+
     # get final mnt
     mnt_final = np.zeros((len(mnt_list), 4))
     mnt_final[:, 0] = mnt_sparse.col*8 + mnt_w_out[mnt_list[:,0], mnt_list[:,1]]
@@ -602,6 +745,8 @@ def label2mnt(mnt_s_out, mnt_w_out, mnt_h_out, mnt_o_out, thresh=0.5):
     mnt_final[mnt_final[:, 2]<0.0, 2] = mnt_final[mnt_final[:, 2]<0.0, 2]+2*np.pi
     mnt_final[:, 3] = mnt_s_out[mnt_list[:,0], mnt_list[:, 1]]
     return mnt_final
+
+
 def test(test_set, model, outdir, test_num=10, draw=True):
     logging.info("Testing %s:"%(test_set))
     img_name, folder_name, img_size = get_maximum_img_size_and_names(test_set)  
@@ -767,12 +912,16 @@ def main():
         train()
     elif args.mode == 'test':
         for folder in test_set:
-            test([folder,], pretrain, output_dir + "/", test_num=258, draw=False)
+            test(
+                [folder, ],
+                pretrain, output_dir + "/",
+                test_num=258, draw=False
+            )
     elif args.mode == 'deploy':
         deploy(args.idir)
     else:
         pass
 
 
-if __name__ =='__main__':
+if __name__ == '__main__':
     main()

@@ -33,7 +33,8 @@ def init_log(output_dir):
     return logging
 
 def copy_file(path_s, path_t):
-    shutil.copy(path_s, path_t)   
+    shutil.copy(path_s, path_t)
+
 
 def get_files_in_folder(folder, file_ext=None):
     files = glob.glob(os.path.join(folder, "*" + file_ext))
@@ -43,6 +44,7 @@ def get_files_in_folder(folder, file_ext=None):
         name, ext = os.path.splitext(name)
         files_name.append(name)
     return np.asarray(files), np.asarray(files_name)
+
 
 def point_rot(points, theta, b_size, a_size):
     cosA = np.cos(theta)
