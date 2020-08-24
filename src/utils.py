@@ -32,6 +32,7 @@ def init_log(output_dir):
     logging.getLogger('').addHandler(console)
     return logging
 
+
 def copy_file(path_s, path_t):
     shutil.copy(path_s, path_t)
 
@@ -54,16 +55,20 @@ def point_rot(points, theta, b_size, a_size):
     points = np.dot(points-b_center, np.array([[cosA,-sinA],[sinA,cosA]]))+a_center
     return points
 
+
 def mnt_reader(file_name):
     f = open(file_name)
     minutiae = []
     for i, line in enumerate(f):
-        if i < 2 or len(line) == 0: continue
+        if i < 2 or len(line) == 0:
+            continue
         w, h, o = [float(x) for x in line.split()]
         w, h = int(round(w)), int(round(h))
         minutiae.append([w, h, o])
     f.close()
     return minutiae
+
+
 def mnt_writer(mnt, image_name, image_size, file_name):
     f = open(file_name, 'w')
     f.write('%s\n'%(image_name))
