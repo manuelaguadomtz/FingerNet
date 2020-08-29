@@ -172,7 +172,7 @@ def get_maximum_img_size_and_names(dataset, sample_rate=None):
 def sub_load_data(data, img_size, aug):
     img_name, dataset = data
     img = cv2.imread(os.path.join(dataset, 'images/') + img_name + args.itype, 0)
-    seg = cv2.imread(os.path.join(dataset, 'seg_labels/') + img_name + '.png', 0)
+    seg = cv2.imread(os.path.join(dataset, 'seg_labels/') + img_name + args.itype, 0)
 
     try:
         ali = cv2.imread(os.path.join(dataset, 'ori_labels/') + img_name + args.itype, 0)
@@ -711,8 +711,8 @@ def train():
             savedir = "%s%s" % (outdir, str(epoch) + '_' + str(i))
             main_net_model.save_weights(savedir, True)
 
-    for folder in test_set:
-        test([folder, ], savedir, outdir, test_num=10, draw=False)
+    # for folder in test_set:
+    #     test([folder, ], savedir, outdir, test_num=10, draw=False)
 
     return
 
