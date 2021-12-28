@@ -1,5 +1,7 @@
 # coding=utf-8
 
+"""Este es el codigo viejo, no usar"""
+
 import os
 import sys
 import cv2

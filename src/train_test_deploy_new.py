@@ -1,5 +1,10 @@
 # coding=utf-8
 
+"""
+Este es el codigo nuevo y el punto de entrada
+de la aplicacion para extraer las caracteristicas
+"""
+
 import os
 import sys
 import cv2
@@ -75,18 +80,19 @@ deploy_set = [
     '../datasets/NIST14/'
 ]
 pretrain = '../models/released_version/Model.model'
-output_dir = '../output/' + datetime.now().strftime('%Y%m%d-%H%M%S')
+output_dir = (
+    '../output/' + datetime.now().strftime('%Y%m%d-%H%M%S')
+)
 
 logging = init_log(args.odir)
-# copy_file(sys.path[0] + '/' + sys.argv[0], args.odir + '/')
-
 
 # image normalization
 def img_normalization(img_input, m0=0.0, var0=1.0):
     m = K.mean(img_input, axis=[1, 2, 3], keepdims=True)
     var = K.var(img_input, axis=[1, 2, 3], keepdims=True)
     after = K.sqrt(var0 * K.tf.square(img_input - m) / var)
-    image_n = K.tf.where(K.tf.greater(img_input, m), m0 + after, m0 - after)
+    image_n = K.tf.where(
+        K.tf.greater(img_input, m), m0 + after, m0 - after)
     return image_n
 
 
@@ -114,27 +120,64 @@ def orientation(image, stride=8, window=17):
         assert image.get_shape().as_list()[3] == 1, 'Images must be grayscale'
         strides = [1, stride, stride, 1]
         E = np.ones([window, window, 1, 1])
-        sobelx = np.reshape(np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=float), [3, 3, 1, 1])
-        sobely = np.reshape(np.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], dtype=float), [3, 3, 1, 1])
+        sobelx = np.reshape(
+            np.array([
+                [-1, 0, 1],
+                [-2, 0, 2],
+                [-1, 0, 1]], dtype=float
+            ), [3, 3, 1, 1]
+        )
+        sobely = np.reshape(np.array([
+            [-1, -2, -1],
+            [0, 0, 0],
+            [1, 2, 1]], dtype=float
+        ), [3, 3, 1, 1])
         gaussian = np.reshape(gaussian2d((5, 5), 1), [5, 5, 1, 1])
         with K.tf.name_scope('sobel_gradient'):
-            Ix = K.tf.nn.conv2d(image, sobelx, strides=[1,1,1,1], padding='SAME', name='sobel_x')
-            Iy = K.tf.nn.conv2d(image, sobely, strides=[1,1,1,1], padding='SAME', name='sobel_y')
+            Ix = K.tf.nn.conv2d(
+                image, sobelx, 
+                strides=[1,1,1,1],
+                padding='SAME',
+                name='sobel_x'
+            )
+            Iy = K.tf.nn.conv2d(
+                image, sobely,
+                strides=[1,1,1,1],
+                padding='SAME',
+                name='sobel_y'
+            )
         with K.tf.name_scope('eltwise_1'):
             Ix2 = K.tf.multiply(Ix, Ix, name='IxIx')
             Iy2 = K.tf.multiply(Iy, Iy, name='IyIy')
             Ixy = K.tf.multiply(Ix, Iy, name='IxIy')
         with K.tf.name_scope('range_sum'):
-            Gxx = K.tf.nn.conv2d(Ix2, E, strides=strides, padding='SAME', name='Gxx_sum')
-            Gyy = K.tf.nn.conv2d(Iy2, E, strides=strides, padding='SAME', name='Gyy_sum')
-            Gxy = K.tf.nn.conv2d(Ixy, E, strides=strides, padding='SAME', name='Gxy_sum')
+            Gxx = K.tf.nn.conv2d(
+                Ix2, E, strides=strides,
+                padding='SAME', name='Gxx_sum'
+            )
+            Gyy = K.tf.nn.conv2d(
+                Iy2, E, strides=strides,
+                padding='SAME', name='Gyy_sum'
+            )
+            Gxy = K.tf.nn.conv2d(
+                Ixy, E, strides=strides,
+                padding='SAME', name='Gxy_sum'
+            )
         with K.tf.name_scope('eltwise_2'):
             Gxx_Gyy = K.tf.subtract(Gxx, Gyy, name='Gxx_Gyy')
             theta = atan2([2*Gxy, Gxx_Gyy]) + np.pi
         # two-dimensional low-pass filter: Gaussian filter here
         with K.tf.name_scope('gaussian_filter'):
-            phi_x = K.tf.nn.conv2d(K.tf.cos(theta), gaussian, strides=[1,1,1,1], padding='SAME', name='gaussian_x')
-            phi_y = K.tf.nn.conv2d(K.tf.sin(theta), gaussian, strides=[1,1,1,1], padding='SAME', name='gaussian_y')
+            phi_x = K.tf.nn.conv2d(
+                K.tf.cos(theta),
+                gaussian, strides=[1,1,1,1],
+                padding='SAME', name='gaussian_x'
+            )
+            phi_y = K.tf.nn.conv2d(
+                K.tf.sin(theta),
+                gaussian, strides=[1,1,1,1],
+                padding='SAME', name='gaussian_y'
+            )
             theta = atan2([phi_y, phi_x])/2
     return theta
 
