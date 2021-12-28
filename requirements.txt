@@ -1,0 +1,8 @@
+scikit-image
+opencv-python==3.4.2.17
+scikit-learn
+tensorflow==1.15.0
+tensorpack==0.8.9
+torchvision==0.2.2
+torch==0.4.1
+keras=2.0.2
